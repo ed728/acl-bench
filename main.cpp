@@ -8,10 +8,19 @@ int main()
 {
 	/* Create the layer. */
 	NEW_LAYER(ConvolutionLayer, conv)(5, 5, 1, 5, 5, 8);
+	TestTensor in(TensorShape(5, 5, 1));
+	/* Weights. */
+	TestTensor weights(TensorShape(5, 5, 1, 8));
+	/* Bias. */
+	TestTensor bias(TensorShape(8));
+	/* Output image. */
+	TestTensor out(TensorShape(5, 5, 8));
+
+
 	/* Buffer needs to accomodate 1 floats per layer per iteration. */
 	float *buff = (float *)malloc(ITERATIONS * LAYERS * sizeof(float));
 	/* We need to pad our data by 2 to accommodate our kernel size. */
-	conv.run(ITERATIONS, buff, PadStrideInfo(1, 1, 2, 2));
+	conv.run(ITERATIONS, buff, PadStrideInfo(1, 1, 2, 2), in, weights, bias, out);
 	/* Print the results. */
 	for (int i = 0; i < ITERATIONS; ++i)
 	{

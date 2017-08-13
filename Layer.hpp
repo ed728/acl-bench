@@ -55,45 +55,31 @@ public:
 	 * @param [out] res   The resulting list of times.
 	 * @param [in]  info  The layer-specific information needed to configure the layer. Must be set-up by the user.
 	 */
-	template<typename _Info>
-	void run(unsigned int iters, float *res, _Info&& info)
+	template<typename _Info, class ... _TensorList>
+	void run(unsigned int iters, float *res, _Info&& info, _TensorList& ... ttl)
 	{
-		/* Input image. */
-		TestTensor in(TensorShape(m_i_shape.x(), m_i_shape.y(), m_i_shape.z()));
-		/* Weights. */
-		TestTensor weights(TensorShape(m_w_shape.x(), m_w_shape.y(), m_i_shape.z(), m_w_shape.z()));
-		/* Bias. */
-		TestTensor bias(TensorShape(m_w_shape.z()));
-		/* Output image. */
-		TestTensor out(TensorShape(m_i_shape.x(), m_i_shape.y(), m_w_shape.z()));
-
-		/* Our timer. */
 		clock_t t;
 
 		/* Allocate the buffers and configure the layer.
 		 * We do this only once since in an actual use-case the size of the tensors
 		 * will be constant. */
-		
-		configure<CLTensor, _L_CL>(info, in, weights, bias, out);
-		configure<Tensor, _L_NE>(info, in, weights, bias, out);
+		configure<CLTensor, _L_CL>(info, ttl ...);
+		configure<Tensor, _L_NE>(info, ttl ...);
 
 		for (size_t i = 0; i < iters; ++i)
 		{
 			/* Randomize the data once for both layers so nothing can be cached in any way. */
-			in.randomize();
-			weights.randomize();
-			bias.randomize();
-			out.randomize();
+			(ttl.randomize(), ...);
 			
 			/* Run NEON and write results. */
 			t = clock();
-			run_layer<Tensor, _L_NE>(in, weights, bias, out);
+			run_layer<Tensor, _L_NE>(fill<Tensor>(ttl) ...);
 			t = clock() - t;
 			res[i*2] = ((float)t)/CLOCKS_PER_SEC;
 
 			/* Run CL and write results. */	
 			t = clock();
-			run_layer<CLTensor, _L_CL>(in, weights, bias, out);
+			run_layer<CLTensor, _L_CL>(fill<CLTensor>(ttl) ...);
 			t = clock() - t;
 			res[i*2+1] = ((float)t)/CLOCKS_PER_SEC;
 		}
@@ -105,19 +91,9 @@ public:
 
 private:
 
-	template<class _T, class _L>
-	void run_layer(TestTensor& in, TestTensor& w, TestTensor& b, TestTensor& out)
+	template<class _T, class _L, class ... _TensorList>
+	void run_layer(_TensorList& ... ttl)
 	{	
-		/* Copy over the tensor data.
-		 * As input, output, and possibly weight, bias data can be changing at runtime,
-		 * we do this each iteration for each layer. This will also be a fair comparison,
-		 * as it will force the GPU mapping, which is a real bottleneck and the purpose
-		 * of this benchmark. */
-		in.fill<_T>();
-		w.fill<_T>();
-		b.fill<_T>();
-		out.fill<_T>();
-
 		/* Synchronize the data between CPU and GPU if we are using CL. */
 		if (std::is_same<_L, _L_CL>::value)
 		{
@@ -128,8 +104,26 @@ private:
 		((_L&)*this).run();
 	}
 
+	/* Due to issues with how the Tensor and CLTensor classes are implemented
+	 * we need the following hacks to call the templated member function
+	 * specializations.
+	 */
+
+	/* Copy over the tensor data.
+	 * As input, output, and possibly weight, bias data can be changing at runtime,
+	 * we do this each iteration for each layer. This will also be a fair comparison,
+	 * as it will force the GPU mapping, which is a real bottleneck and the purpose
+	 * of this benchmark. */
+	template<class _T>
+	TestTensor& fill(TestTensor& tt)
+	{
+		tt.fill<_T>();
+		return tt;
+	}
+
 	/* We return the same thing just to put this into the configure call.
-	 * Should be done more nicely later. */
+	 * Should be done more nicely later.
+	 */
 	template<class _T>
 	TestTensor& ready(TestTensor& tt)
 	{
@@ -137,6 +131,7 @@ private:
 		return tt;
 	}
 
+	/* Configures the layer with the given tensor list. */
 	template<class _Tensor, class _Layer, typename _Info, typename ... _TensorList>
 	void configure(_Info&& info, _TensorList& ... ttl)
 	{
